@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vantron-remote-media-server"
+version = "0.0.0"
+authors = [
+    { name = "@shyndman" },
+]
+description = "A WebSocket-based media server for playing audio over the van's speakers"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=15.0",
+    "loguru>=0.7.2",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.3.0",
+    "pre-commit>=3.6.0",
+]
+
+[tool.uv]
+default-groups = ["dev"]
