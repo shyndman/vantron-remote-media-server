@@ -20,7 +20,7 @@ dependencies = [
 target-version = "py310"
 line-length = 88
 
-[lint]
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
