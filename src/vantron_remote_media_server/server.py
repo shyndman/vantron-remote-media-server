@@ -4,12 +4,12 @@ import asyncio
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 import websockets
 from loguru import logger
+from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
-from websockets.server import ServerConnection
 
 # Environment variable configuration
 DEFAULT_HOST = "0.0.0.0"
@@ -32,10 +32,10 @@ class PlayerState:
     """Represents the current state of the van's media player."""
 
     state: str = "idle"  # idle, playing, paused, error
-    media: Optional[Dict[str, Any]] = None
+    media: dict[str, Any] | None = None
     volume: float = 1.0
     muted: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class MediaPlayerServer:
@@ -53,36 +53,41 @@ class MediaPlayerServer:
             logger.info(f"Van media server started on ws://{self.host}:{self.port}")
             await asyncio.Future()  # run forever
 
+    async def _handle_message(
+        self, websocket: ServerConnection, message: str | bytes, client_info: str
+    ) -> None:
+        """Handle a single message from a client."""
+        try:
+            request = json.loads(message)
+            logger.debug(f"Received request from {client_info}: {request}")
+            response = await self.handle_request(request)
+            if response:
+                await websocket.send(json.dumps(response))
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON received from {client_info}")
+            await self.send_error(websocket, -32700, "Parse error")
+        except Exception:
+            logger.exception(f"Error handling message from {client_info}")
+            await self.send_error(websocket, -32603, "Internal error")
+
     async def handle_client(self, websocket: ServerConnection) -> None:
         """Handle a client connection."""
         client_info = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
         logger.info(f"New client connected from {client_info}")
 
-        self.connections.add(websocket)
         try:
-            # Send initial state
+            self.connections.add(websocket)
             await self.send_state_update(websocket)
 
-            # Handle incoming messages
             async for message in websocket:
-                try:
-                    request = json.loads(message)
-                    logger.debug(f"Received request from {client_info}: {request}")
-                    response = await self.handle_request(request)
-                    if response:
-                        await websocket.send(json.dumps(response))
-                except json.JSONDecodeError:
-                    logger.error(f"Invalid JSON received from {client_info}")
-                    await self.send_error(websocket, -32700, "Parse error")
-                except Exception:
-                    logger.exception(f"Error handling message from {client_info}")
-                    await self.send_error(websocket, -32603, "Internal error")
+                await self._handle_message(websocket, message, client_info)
+
         except ConnectionClosed:
             logger.info(f"Client disconnected: {client_info}")
         finally:
             self.connections.remove(websocket)
 
-    async def handle_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def handle_request(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """Handle a JSON-RPC request."""
         if "method" not in request:
             return self.create_error_response(
@@ -144,13 +149,12 @@ class MediaPlayerServer:
             "id": None,
         }
         await websocket.send(json.dumps(error_msg))
-        logger.debug(
-            f"Error sent to {websocket.remote_address[0]}:{websocket.remote_address[1]}: {message}"
-        )
+        client_addr = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
+        logger.debug(f"Error sent to {client_addr}: {message}")
 
     def create_error_response(
         self, request_id: Any, code: int, message: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a JSON-RPC error response."""
         return {
             "jsonrpc": "2.0",
@@ -158,7 +162,7 @@ class MediaPlayerServer:
             "id": request_id,
         }
 
-    def get_state_dict(self) -> Dict[str, Any]:
+    def get_state_dict(self) -> dict[str, Any]:
         """Get the current state as a dictionary."""
         return {
             "state": self.state.state,
@@ -170,18 +174,18 @@ class MediaPlayerServer:
 
     # JSON-RPC method handlers
 
-    async def handle_getState(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_getState(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle getState method."""
         return self.get_state_dict()
 
-    async def handle_getSupportedMediaTypes(self, params: Dict[str, Any]) -> list[str]:
+    async def handle_getSupportedMediaTypes(self, params: dict[str, Any]) -> list[str]:
         """Handle getSupportedMediaTypes method."""
         return ["music"]  # Only supporting audio playback
 
     # Placeholder handlers for media control methods
     # These will be implemented later with actual audio playback logic
 
-    async def handle_play(self, params: Dict[str, Any]) -> bool:
+    async def handle_play(self, params: dict[str, Any]) -> bool:
         """Handle play method."""
         if self.state.state == "paused":
             self.state.state = "playing"
@@ -189,7 +193,7 @@ class MediaPlayerServer:
             await self.broadcast_state()
         return True
 
-    async def handle_pause(self, params: Dict[str, Any]) -> bool:
+    async def handle_pause(self, params: dict[str, Any]) -> bool:
         """Handle pause method."""
         if self.state.state == "playing":
             self.state.state = "paused"
@@ -197,7 +201,7 @@ class MediaPlayerServer:
             await self.broadcast_state()
         return True
 
-    async def handle_stop(self, params: Dict[str, Any]) -> bool:
+    async def handle_stop(self, params: dict[str, Any]) -> bool:
         """Handle stop method."""
         self.state.state = "idle"
         self.state.media = None
@@ -205,7 +209,7 @@ class MediaPlayerServer:
         await self.broadcast_state()
         return True
 
-    async def handle_setVolume(self, params: Dict[str, Any]) -> bool:
+    async def handle_setVolume(self, params: dict[str, Any]) -> bool:
         """Handle setVolume method."""
         if "level" in params:
             level = max(0.0, min(1.0, float(params["level"])))
@@ -214,7 +218,7 @@ class MediaPlayerServer:
             await self.broadcast_state()
         return True
 
-    async def handle_load(self, params: Dict[str, Any]) -> bool:
+    async def handle_load(self, params: dict[str, Any]) -> bool:
         """Handle load method."""
         if "url" not in params:
             raise ValueError("URL is required")
